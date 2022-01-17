@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/prometheus/procfs/internal/fs"
 	"github.com/prometheus/procfs/internal/util"
@@ -118,6 +119,81 @@ type ProcStat struct {
 // Deprecated: use p.Stat() instead
 func (p Proc) NewStat() (ProcStat, error) {
 	return p.Stat()
+}
+
+func (p Proc) Tstat(tid int) (ProcStat, error) {
+	data, err := util.ReadFileNoStat(p.path("task/"+strconv.Itoa(tid)) + "/stat")
+	if err != nil {
+		return ProcStat{}, err
+	}
+
+	var (
+		ignoreInt64  int64
+		ignoreUint64 uint64
+
+		s = ProcStat{PID: p.PID, proc: p.fs}
+		l = bytes.Index(data, []byte("("))
+		r = bytes.LastIndex(data, []byte(")"))
+	)
+
+	if l < 0 || r < 0 {
+		return ProcStat{}, fmt.Errorf("unexpected format, couldn't extract comm %q", data)
+	}
+
+	s.Comm = string(data[l+1 : r])
+
+	// Check the following resources for the details about the particular stat
+	// fields and their data types:
+	// * https://man7.org/linux/man-pages/man5/proc.5.html
+	// * https://man7.org/linux/man-pages/man3/scanf.3.html
+	_, err = fmt.Fscan(
+		bytes.NewBuffer(data[r+2:]),
+		&s.State,
+		&s.PPID,
+		&s.PGRP,
+		&s.Session,
+		&s.TTY,
+		&s.TPGID,
+		&s.Flags,
+		&s.MinFlt,
+		&s.CMinFlt,
+		&s.MajFlt,
+		&s.CMajFlt,
+		&s.UTime,
+		&s.STime,
+		&s.CUTime,
+		&s.CSTime,
+		&s.Priority,
+		&s.Nice,
+		&s.NumThreads,
+		&ignoreInt64,
+		&s.Starttime,
+		&s.VSize,
+		&s.RSS,
+		&s.RSSLimit,
+		&ignoreUint64,
+		&ignoreUint64,
+		&ignoreUint64,
+		&ignoreUint64,
+		&ignoreUint64,
+		&ignoreUint64,
+		&ignoreUint64,
+		&ignoreUint64,
+		&ignoreUint64,
+		&ignoreUint64,
+		&ignoreUint64,
+		&ignoreUint64,
+		&ignoreInt64,
+		&ignoreInt64,
+		&s.RTPriority,
+		&s.Policy,
+		&s.DelayAcctBlkIOTicks,
+	)
+	if err != nil {
+		return ProcStat{}, err
+	}
+
+	return s, nil
 }
 
 // Stat returns the current status information of the process.
